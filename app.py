@@ -5,6 +5,7 @@ import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 import os
+import time
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_anthropic import ChatAnthropic
@@ -31,10 +32,10 @@ anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY")
 
 if not gemini_api_key:
     st.warning("⚠️ Please set your GEMINI_API_KEY in the environment variables.")
+if not hf_api_token:
+    st.error("🛑 HUGGINGFACEHUB_API_TOKEN is missing. This is required to process documents for free.")
 if not anthropic_api_key:
     st.info("ℹ️ ANTHROPIC_API_KEY not found. The Claude option will be disabled.")
-if not hf_api_token:
-    st.info("ℹ️ HUGGINGFACEHUB_API_TOKEN not found. The free Mistral AI option will be disabled.")
 
 # --- INITIALIZE SESSION STATE ---
 if "vector_store" not in st.session_state:
@@ -68,7 +69,7 @@ with st.sidebar:
     
     if st.button("Process Sources"):
         if uploaded_files or web_links.strip():
-            with st.spinner("Reading and indexing your sources (this may take a moment)..."):
+            with st.spinner("Reading and indexing your sources..."):
                 raw_text = ""
                 
                 # 1. Process Uploaded Files
@@ -109,33 +110,40 @@ with st.sidebar:
                     st.session_state.raw_text = raw_text
 
                     # Chunk the text
-                    text_splitter = RecursiveCharacterTextSplitter(chunk_size=4000, chunk_overlap=400)
+                    text_splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=200)
                     chunks = text_splitter.split_text(raw_text)
 
-                    # --- DYNAMIC EMBEDDING ROUTING ---
-                    # Use Google's embeddings if Gemini is selected OR if HF token is missing.
-                    # Otherwise, use Hugging Face embeddings to save Google quota!
-                    if ai_choice == "Gemini 2.5 Flash (Smart & Fast)" or not hf_api_token:
-                        if not gemini_api_key:
-                            st.error("Gemini API key required to process embeddings.")
-                            st.stop()
-                        embeddings = GoogleGenerativeAIEmbeddings(
-                            model="models/gemini-embedding-001", 
-                            google_api_key=gemini_api_key
-                        )
+                    # --- EMBEDDING STRATEGY (The Fix) ---
+                    # We ALWAYS use Hugging Face for embeddings if the token exists.
+                    # This bypasses Google's strict 429 rate limits completely.
+                    if hf_api_token:
+                        try:
+                            embeddings = HuggingFaceEndpointEmbeddings(
+                                model="sentence-transformers/all-MiniLM-L6-v2",
+                                task="feature-extraction",
+                                huggingfacehub_api_token=hf_api_token
+                            )
+                            vector_store = FAISS.from_texts(chunks, embedding=embeddings)
+                            st.session_state.vector_store = vector_store
+                            st.success("Sources processed successfully using Hugging Face Engine!")
+                        except Exception as e:
+                            st.error(f"Hugging Face Embedding Error: {e}")
+                    elif gemini_api_key:
+                        # Fallback to Google only if absolutely necessary
+                        st.warning("⚠️ Using Google Embeddings (Quota Limits Apply). If this fails, add a Hugging Face token.")
+                        try:
+                            embeddings = GoogleGenerativeAIEmbeddings(
+                                model="models/gemini-embedding-001", 
+                                google_api_key=gemini_api_key
+                            )
+                            vector_store = FAISS.from_texts(chunks, embedding=embeddings)
+                            st.session_state.vector_store = vector_store
+                            st.success("Sources processed successfully!")
+                        except Exception as e:
+                            st.error(f"Google Embedding Error: {e}")
                     else:
-                        embeddings = HuggingFaceEndpointEmbeddings(
-                            model="sentence-transformers/all-MiniLM-L6-v2",
-                            task="feature-extraction",
-                            huggingfacehub_api_token=hf_api_token
-                        )
-                    
-                    try:
-                        vector_store = FAISS.from_texts(chunks, embedding=embeddings)
-                        st.session_state.vector_store = vector_store
-                        st.success("Sources processed successfully!")
-                    except Exception as e:
-                        st.error(f"API Error during processing: {e}. If this says RESOURCE_EXHAUSTED, your documents are still too large for the Free Tier limit.")
+                        st.error("No API keys found for embeddings.")
+
                 else:
                     st.error("No readable text was found in the provided sources.")
         else:
