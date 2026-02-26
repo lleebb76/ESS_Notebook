@@ -146,7 +146,7 @@ if user_question := st.chat_input("Ask a question about your sources..."):
             with st.spinner(f"Thinking using {ai_choice}..."):
                 
                 if ai_choice == "Gemini 2.5 Flash (Smart & Fast)":
-                    llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=gemini_api_key)
+                    llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=gemini_api_key)
                 else:
                     llm = HuggingFaceEndpoint(
                         repo_id="mistralai/Mistral-7B-Instruct-v0.2", 
