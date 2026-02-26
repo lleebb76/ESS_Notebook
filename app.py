@@ -8,7 +8,7 @@ import os
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_anthropic import ChatAnthropic
-from langchain_community.llms import HuggingFaceEndpoint
+from langchain_huggingface import HuggingFaceEndpoint
 from langchain_community.vectorstores import FAISS
 from langchain_classic.chains import create_retrieval_chain
 from langchain_classic.chains.combine_documents import create_stuff_documents_chain
@@ -34,7 +34,7 @@ if not gemini_api_key:
 if not anthropic_api_key:
     st.info("ℹ️ ANTHROPIC_API_KEY not found. The Claude option will be disabled.")
 if not hf_api_token:
-    st.info("ℹ️ HUGGINGFACEHUB_API_TOKEN not found. The free AI option will be disabled.")
+    st.info("ℹ️ HUGGINGFACEHUB_API_TOKEN not found. The free Mistral AI option will be disabled.")
 
 # --- INITIALIZE SESSION STATE ---
 if "vector_store" not in st.session_state:
@@ -112,15 +112,12 @@ with st.sidebar:
                         st.session_state.raw_text = raw_text
 
                         # --- THE 429 RATE LIMIT FIX ---
-                        # We significantly increased the chunk_size (from 1000 to 4000). 
-                        # This means your text is divided into far fewer pieces, resulting 
-                        # in fewer rapid-fire requests to the Google Embedding API.
                         text_splitter = RecursiveCharacterTextSplitter(chunk_size=4000, chunk_overlap=400)
                         chunks = text_splitter.split_text(raw_text)
 
-                        # Create Vector Store using Google's current stable embedding model
+                        # Create Vector Store using Google's newest embedding model
                         embeddings = GoogleGenerativeAIEmbeddings(
-                            model="models/text-embedding-004", 
+                            model="models/gemini-embedding-001", 
                             google_api_key=gemini_api_key
                         )
                         
