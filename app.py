@@ -8,7 +8,7 @@ import os
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_anthropic import ChatAnthropic
-from langchain_huggingface import HuggingFaceEndpoint
+from langchain_huggingface import HuggingFaceEndpoint, HuggingFaceEndpointEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_classic.chains import create_retrieval_chain
 from langchain_classic.chains.combine_documents import create_stuff_documents_chain
@@ -68,67 +68,76 @@ with st.sidebar:
     
     if st.button("Process Sources"):
         if uploaded_files or web_links.strip():
-            if not gemini_api_key:
-                st.error("Gemini API key required to process embeddings.")
-            else:
-                with st.spinner("Reading and indexing your sources (this may take a moment)..."):
-                    raw_text = ""
-                    
-                    # 1. Process Uploaded Files
-                    if uploaded_files:
-                        for file in uploaded_files:
-                            filename = file.name.lower()
-                            try:
-                                if filename.endswith(".pdf"):
-                                    pdf_reader = PyPDF2.PdfReader(file)
-                                    for page in pdf_reader.pages:
-                                        text = page.extract_text()
-                                        if text: raw_text += text + "\n"
-                                elif filename.endswith(".docx"):
-                                    raw_text += docx2txt.process(file) + "\n"
-                                elif filename.endswith(".csv"):
-                                    df = pd.read_csv(file)
-                                    raw_text += df.to_string() + "\n"
-                                elif filename.endswith(".xlsx"):
-                                    df = pd.read_excel(file)
-                                    raw_text += df.to_string() + "\n"
-                                elif filename.endswith(".txt"):
-                                    raw_text += file.getvalue().decode("utf-8") + "\n"
-                            except Exception as e:
-                                st.error(f"Could not read {file.name}: {e}")
-                    
-                    # 2. Process Web Links
-                    if web_links.strip():
-                        urls = [url.strip() for url in web_links.split('\n') if url.strip()]
-                        for url in urls:
-                            try:
-                                response = requests.get(url, timeout=10)
-                                soup = BeautifulSoup(response.content, 'html.parser')
-                                raw_text += ' '.join(soup.stripped_strings) + "\n"
-                            except Exception as e:
-                                 st.error(f"Could not read URL {url}: {e}")
-                    
-                    if raw_text.strip():
-                        st.session_state.raw_text = raw_text
+            with st.spinner("Reading and indexing your sources (this may take a moment)..."):
+                raw_text = ""
+                
+                # 1. Process Uploaded Files
+                if uploaded_files:
+                    for file in uploaded_files:
+                        filename = file.name.lower()
+                        try:
+                            if filename.endswith(".pdf"):
+                                pdf_reader = PyPDF2.PdfReader(file)
+                                for page in pdf_reader.pages:
+                                    text = page.extract_text()
+                                    if text: raw_text += text + "\n"
+                            elif filename.endswith(".docx"):
+                                raw_text += docx2txt.process(file) + "\n"
+                            elif filename.endswith(".csv"):
+                                df = pd.read_csv(file)
+                                raw_text += df.to_string() + "\n"
+                            elif filename.endswith(".xlsx"):
+                                df = pd.read_excel(file)
+                                raw_text += df.to_string() + "\n"
+                            elif filename.endswith(".txt"):
+                                raw_text += file.getvalue().decode("utf-8") + "\n"
+                        except Exception as e:
+                            st.error(f"Could not read {file.name}: {e}")
+                
+                # 2. Process Web Links
+                if web_links.strip():
+                    urls = [url.strip() for url in web_links.split('\n') if url.strip()]
+                    for url in urls:
+                        try:
+                            response = requests.get(url, timeout=10)
+                            soup = BeautifulSoup(response.content, 'html.parser')
+                            raw_text += ' '.join(soup.stripped_strings) + "\n"
+                        except Exception as e:
+                                st.error(f"Could not read URL {url}: {e}")
+                
+                if raw_text.strip():
+                    st.session_state.raw_text = raw_text
 
-                        # --- THE 429 RATE LIMIT FIX ---
-                        text_splitter = RecursiveCharacterTextSplitter(chunk_size=4000, chunk_overlap=400)
-                        chunks = text_splitter.split_text(raw_text)
+                    # Chunk the text
+                    text_splitter = RecursiveCharacterTextSplitter(chunk_size=4000, chunk_overlap=400)
+                    chunks = text_splitter.split_text(raw_text)
 
-                        # Create Vector Store using Google's newest embedding model
+                    # --- DYNAMIC EMBEDDING ROUTING ---
+                    # Use Google's embeddings if Gemini is selected OR if HF token is missing.
+                    # Otherwise, use Hugging Face embeddings to save Google quota!
+                    if ai_choice == "Gemini 2.5 Flash (Smart & Fast)" or not hf_api_token:
+                        if not gemini_api_key:
+                            st.error("Gemini API key required to process embeddings.")
+                            st.stop()
                         embeddings = GoogleGenerativeAIEmbeddings(
                             model="models/gemini-embedding-001", 
                             google_api_key=gemini_api_key
                         )
-                        
-                        try:
-                            vector_store = FAISS.from_texts(chunks, embedding=embeddings)
-                            st.session_state.vector_store = vector_store
-                            st.success("Sources processed successfully!")
-                        except Exception as e:
-                            st.error(f"API Error during processing: {e}. If this says RESOURCE_EXHAUSTED, your documents are still too large for the Free Tier limit.")
                     else:
-                        st.error("No readable text was found in the provided sources.")
+                        embeddings = HuggingFaceEndpointEmbeddings(
+                            model="sentence-transformers/all-MiniLM-L6-v2",
+                            task="feature-extraction",
+                            huggingfacehub_api_token=hf_api_token
+                        )
+                    
+                    try:
+                        vector_store = FAISS.from_texts(chunks, embedding=embeddings)
+                        st.session_state.vector_store = vector_store
+                        st.success("Sources processed successfully!")
+                    except Exception as e:
+                        st.error(f"API Error during processing: {e}. If this says RESOURCE_EXHAUSTED, your documents are still too large for the Free Tier limit.")
+                else:
+                    st.error("No readable text was found in the provided sources.")
         else:
             st.warning("Please upload a file or enter a web link.")
 
