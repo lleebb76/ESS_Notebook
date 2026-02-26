@@ -7,3 +7,4 @@ langchain-huggingface
 huggingface_hub
 faiss-cpu
 python-dotenv
+langchain-classic
