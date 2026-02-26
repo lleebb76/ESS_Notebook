@@ -7,6 +7,7 @@ from bs4 import BeautifulSoup
 import os
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
+from langchain_anthropic import ChatAnthropic
 from langchain_community.llms import HuggingFaceEndpoint
 from langchain_community.vectorstores import FAISS
 from langchain_classic.chains import create_retrieval_chain
@@ -26,9 +27,12 @@ st.markdown("### Your AI-powered research assistant for Environmental Standards.
 # --- API KEY CHECKS ---
 gemini_api_key = os.environ.get("GEMINI_API_KEY")
 hf_api_token = os.environ.get("HUGGINGFACEHUB_API_TOKEN")
+anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY")
 
 if not gemini_api_key:
     st.warning("⚠️ Please set your GEMINI_API_KEY in the environment variables.")
+if not anthropic_api_key:
+    st.info("ℹ️ ANTHROPIC_API_KEY not found. The Claude option will be disabled.")
 if not hf_api_token:
     st.info("ℹ️ HUGGINGFACEHUB_API_TOKEN not found. The free AI option will be disabled.")
 
@@ -45,7 +49,7 @@ with st.sidebar:
     st.header("⚙️ AI Settings")
     ai_choice = st.radio(
         "Select your AI Brain:",
-        ("Gemini 2.5 Flash (Smart & Fast)", "Mistral 7B (Free Open Source)")
+        ("Gemini 2.5 Flash (Smart & Fast)", "Claude 3.5 Sonnet (Nuanced & Logical)", "Mistral 7B (Free Open Source)")
     )
     
     st.divider()
@@ -67,7 +71,7 @@ with st.sidebar:
             if not gemini_api_key:
                 st.error("Gemini API key required to process embeddings.")
             else:
-                with st.spinner("Reading and indexing your sources..."):
+                with st.spinner("Reading and indexing your sources (this may take a moment)..."):
                     raw_text = ""
                     
                     # 1. Process Uploaded Files
@@ -107,19 +111,25 @@ with st.sidebar:
                     if raw_text.strip():
                         st.session_state.raw_text = raw_text
 
-                        # Split Text
-                        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+                        # --- THE 429 RATE LIMIT FIX ---
+                        # We significantly increased the chunk_size (from 1000 to 4000). 
+                        # This means your text is divided into far fewer pieces, resulting 
+                        # in fewer rapid-fire requests to the Google Embedding API.
+                        text_splitter = RecursiveCharacterTextSplitter(chunk_size=4000, chunk_overlap=400)
                         chunks = text_splitter.split_text(raw_text)
 
-                        # Create Vector Store using the NEW Gemini Embedding Model
+                        # Create Vector Store using Google's current stable embedding model
                         embeddings = GoogleGenerativeAIEmbeddings(
-                            model="models/gemini-embedding-001", 
+                            model="models/text-embedding-004", 
                             google_api_key=gemini_api_key
                         )
-                        vector_store = FAISS.from_texts(chunks, embedding=embeddings)
-                        st.session_state.vector_store = vector_store
                         
-                        st.success("Sources processed successfully!")
+                        try:
+                            vector_store = FAISS.from_texts(chunks, embedding=embeddings)
+                            st.session_state.vector_store = vector_store
+                            st.success("Sources processed successfully!")
+                        except Exception as e:
+                            st.error(f"API Error during processing: {e}. If this says RESOURCE_EXHAUSTED, your documents are still too large for the Free Tier limit.")
                     else:
                         st.error("No readable text was found in the provided sources.")
         else:
@@ -137,6 +147,8 @@ if user_question := st.chat_input("Ask a question about your sources..."):
         st.error("Please process your sources first!")
     elif ai_choice == "Mistral 7B (Free Open Source)" and not hf_api_token:
          st.error("Cannot use Mistral. Please add your Hugging Face API token to the environment variables.")
+    elif ai_choice == "Claude 3.5 Sonnet (Nuanced & Logical)" and not anthropic_api_key:
+         st.error("Cannot use Claude. Please add your Anthropic API key to the environment variables.")
     else:
         st.session_state.chat_history.append({"role": "user", "content": user_question})
         with st.chat_message("user"):
@@ -145,8 +157,11 @@ if user_question := st.chat_input("Ask a question about your sources..."):
         with st.chat_message("assistant"):
             with st.spinner(f"Thinking using {ai_choice}..."):
                 
+                # --- DYNAMIC AI SELECTION ---
                 if ai_choice == "Gemini 2.5 Flash (Smart & Fast)":
                     llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=gemini_api_key)
+                elif ai_choice == "Claude 3.5 Sonnet (Nuanced & Logical)":
+                    llm = ChatAnthropic(model_name="claude-3-5-sonnet-latest", anthropic_api_key=anthropic_api_key)
                 else:
                     llm = HuggingFaceEndpoint(
                         repo_id="mistralai/Mistral-7B-Instruct-v0.2", 
