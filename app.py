@@ -23,7 +23,7 @@ try:
 except FileNotFoundError:
     st.title("📚 ESS Notebook")
 
-st.markdown("### Your AI-powered research assistant for Environmental Standards.")
+st.markdown("### Your research and maybe coding assistant for Environmental Standards.")
 
 # --- API KEY CHECKS ---
 gemini_api_key = os.environ.get("GEMINI_API_KEY")
