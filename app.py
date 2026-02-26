@@ -45,7 +45,7 @@ with st.sidebar:
     st.header("⚙️ AI Settings")
     ai_choice = st.radio(
         "Select your AI Brain:",
-        ("Gemini 1.5 Flash (Smart & Fast)", "Mistral 7B (Free Open Source)")
+        ("Gemini 2.5 Flash (Smart & Fast)", "Mistral 7B (Free Open Source)")
     )
     
     st.divider()
@@ -145,7 +145,7 @@ if user_question := st.chat_input("Ask a question about your sources..."):
         with st.chat_message("assistant"):
             with st.spinner(f"Thinking using {ai_choice}..."):
                 
-                if ai_choice == "Gemini 1.5 Flash (Smart & Fast)":
+                if ai_choice == "Gemini 2.5 Flash (Smart & Fast)":
                     llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=gemini_api_key)
                 else:
                     llm = HuggingFaceEndpoint(
