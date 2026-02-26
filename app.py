@@ -57,14 +57,12 @@ with st.sidebar:
     
     st.header("📄 Your Sources")
     
-    # Expanded File Uploader
     uploaded_files = st.file_uploader(
         "Upload Documents", 
         type=["pdf", "docx", "txt", "csv", "xlsx"], 
         accept_multiple_files=True
     )
     
-    # Web Link Input
     web_links = st.text_area("Add Web Links (paste one URL per line)")
     
     if st.button("Process Sources"):
@@ -109,13 +107,10 @@ with st.sidebar:
                 if raw_text.strip():
                     st.session_state.raw_text = raw_text
 
-                    # Chunk the text
                     text_splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=200)
                     chunks = text_splitter.split_text(raw_text)
 
-                    # --- EMBEDDING STRATEGY (The Fix) ---
-                    # We ALWAYS use Hugging Face for embeddings if the token exists.
-                    # This bypasses Google's strict 429 rate limits completely.
+                    # --- EMBEDDING STRATEGY ---
                     if hf_api_token:
                         try:
                             embeddings = HuggingFaceEndpointEmbeddings(
@@ -125,24 +120,39 @@ with st.sidebar:
                             )
                             vector_store = FAISS.from_texts(chunks, embedding=embeddings)
                             st.session_state.vector_store = vector_store
-                            st.success("Sources processed successfully using Hugging Face Engine!")
+                            st.success("Sources processed successfully! Generating overview...")
+                            
+                            # --- NOTEBOOK OVERVIEW GENERATOR ---
+                            with st.spinner(f"Writing Notebook Overview using {ai_choice}..."):
+                                try:
+                                    # Instantiate the correct model for the summary
+                                    if ai_choice == "Gemini 2.5 Flash (Smart & Fast)":
+                                        llm_summary = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=gemini_api_key)
+                                        prompt_text = f"You are an expert analyst. Read the following source material and provide a detailed, multi-paragraph overview of the key themes, main arguments, and essential data points. \n\n{raw_text[:50000]}"
+                                        response = llm_summary.invoke(prompt_text)
+                                        summary_content = response.content
+                                    elif ai_choice == "Claude 3.5 Sonnet (Nuanced & Logical)":
+                                        llm_summary = ChatAnthropic(model_name="claude-3-5-sonnet-latest", anthropic_api_key=anthropic_api_key)
+                                        prompt_text = f"You are an expert analyst. Read the following source material and provide a detailed, multi-paragraph overview of the key themes, main arguments, and essential data points. \n\n{raw_text[:50000]}"
+                                        response = llm_summary.invoke(prompt_text)
+                                        summary_content = response.content
+                                    else:
+                                        # Mistral requires a much shorter prompt due to free tier context window limits
+                                        llm_summary = HuggingFaceEndpoint(repo_id="mistralai/Mistral-7B-Instruct-v0.2", huggingfacehub_api_token=hf_api_token, temperature=0.3, max_new_tokens=512)
+                                        prompt_text = f"Provide a comprehensive summary of the key themes in this text:\n\n{raw_text[:8000]}"
+                                        summary_content = llm_summary.invoke(prompt_text)
+                                    
+                                    # Inject the summary into the chat history as the first message!
+                                    overview_message = f"**📑 Source Overview:**\n\n{summary_content}"
+                                    st.session_state.chat_history.append({"role": "assistant", "content": overview_message})
+                                    st.rerun() # Refresh the page to show the new summary in the chat window
+                                except Exception as summary_e:
+                                    st.warning(f"Sources loaded, but could not generate automatic summary: {summary_e}")
+                                    
                         except Exception as e:
                             st.error(f"Hugging Face Embedding Error: {e}")
-                    elif gemini_api_key:
-                        # Fallback to Google only if absolutely necessary
-                        st.warning("⚠️ Using Google Embeddings (Quota Limits Apply). If this fails, add a Hugging Face token.")
-                        try:
-                            embeddings = GoogleGenerativeAIEmbeddings(
-                                model="models/gemini-embedding-001", 
-                                google_api_key=gemini_api_key
-                            )
-                            vector_store = FAISS.from_texts(chunks, embedding=embeddings)
-                            st.session_state.vector_store = vector_store
-                            st.success("Sources processed successfully!")
-                        except Exception as e:
-                            st.error(f"Google Embedding Error: {e}")
                     else:
-                        st.error("No API keys found for embeddings.")
+                        st.error("Hugging Face API token missing. Cannot process.")
 
                 else:
                     st.error("No readable text was found in the provided sources.")
@@ -169,25 +179,22 @@ if user_question := st.chat_input("Ask a question about your sources..."):
             st.markdown(user_question)
 
         with st.chat_message("assistant"):
-            with st.spinner(f"Thinking using {ai_choice}..."):
+            with st.spinner(f"Analyzing deeply using {ai_choice}..."):
                 
-                # --- DYNAMIC AI SELECTION ---
                 if ai_choice == "Gemini 2.5 Flash (Smart & Fast)":
                     llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=gemini_api_key)
                 elif ai_choice == "Claude 3.5 Sonnet (Nuanced & Logical)":
                     llm = ChatAnthropic(model_name="claude-3-5-sonnet-latest", anthropic_api_key=anthropic_api_key)
                 else:
-                    llm = HuggingFaceEndpoint(
-                        repo_id="mistralai/Mistral-7B-Instruct-v0.2", 
-                        huggingfacehub_api_token=hf_api_token,
-                        temperature=0.3,
-                        max_new_tokens=512
-                    )
+                    llm = HuggingFaceEndpoint(repo_id="mistralai/Mistral-7B-Instruct-v0.2", huggingfacehub_api_token=hf_api_token, temperature=0.3, max_new_tokens=512)
                 
+                # --- UPDATED SYSTEM PROMPT FOR MAXIMUM DETAIL ---
                 system_prompt = (
-                    "You are ESS Notebook, an expert AI assistant for Environmental Standards Scotland. "
-                    "Use the provided retrieved context to answer the user's question clearly and professionally. "
-                    "If you don't know the answer based on the context, just say that you don't know. "
+                    "You are ESS Notebook, a highly analytical and expert AI research assistant for Environmental Standards Scotland. "
+                    "Your primary goal is to provide deeply detailed, comprehensive, and exhaustive answers based strictly on the provided context. "
+                    "Always structure your answers logically using multiple paragraphs, and use bullet points to extract key lists, metrics, or regulations. "
+                    "Never provide a short answer if a long, detailed explanation is warranted by the context. "
+                    "If you cannot answer the question based on the context, state clearly that the information is not present in the uploaded sources. "
                     "Context: {context}"
                 )
                 
@@ -196,7 +203,9 @@ if user_question := st.chat_input("Ask a question about your sources..."):
                     ("human", "{input}"),
                 ])
                 
-                retriever = st.session_state.vector_store.as_retriever(search_kwargs={"k": 4})
+                # --- INCREASED 'K' FOR MORE CONTEXT ---
+                # We changed k=4 to k=10. The AI now reads 2.5x more text before answering!
+                retriever = st.session_state.vector_store.as_retriever(search_kwargs={"k": 10})
                 question_answer_chain = create_stuff_documents_chain(llm, prompt)
                 rag_chain = create_retrieval_chain(retriever, question_answer_chain)
                 
