@@ -55,6 +55,12 @@ with st.sidebar:
         ("Gemini 2.5 Flash (Smart & Fast)", "Claude 3.5 Sonnet (Nuanced & Logical)", "Mistral 7B (Free Open Source)")
     )
     
+    # --- NEW KNOWLEDGE BASE TOGGLE ---
+    knowledge_source = st.radio(
+        "Knowledge Base:",
+        ("Strictly Uploaded Sources", "Include General Knowledge")
+    )
+    
     # Clear Chat Button
     if st.button("🗑️ Clear Chat History"):
         st.session_state.chat_history = []
@@ -175,8 +181,8 @@ for message in st.session_state.chat_history:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# --- UPDATED CHAT INPUT TEXT ---
-if user_question := st.chat_input("Ask about your sources (or explicitly ask to use outside knowledge)..."):
+# Reverted chat input text to be cleaner
+if user_question := st.chat_input("Ask a question about your sources..."):
     if st.session_state.vector_store is None:
         st.error("Please process your sources first!")
     elif ai_choice == "Mistral 7B (Free Open Source)" and not hf_api_token:
@@ -205,14 +211,17 @@ if user_question := st.chat_input("Ask about your sources (or explicitly ask to 
                 else:
                     llm = HuggingFaceEndpoint(repo_id="mistralai/Mistral-7B-Instruct-v0.2", huggingfacehub_api_token=hf_api_token, temperature=0.3, max_new_tokens=512)
                 
-                # --- UPDATED SYSTEM PROMPT FOR EXTERNAL KNOWLEDGE ---
+                # --- DYNAMIC KNOWLEDGE INSTRUCTION ---
+                if knowledge_source == "Strictly Uploaded Sources":
+                    knowledge_instruction = "IMPORTANT: Answer STRICTLY using the provided context. If the answer is not in the context, clearly state that the information is not present in the uploaded sources. Do not hallucinate or use outside knowledge."
+                else:
+                    knowledge_instruction = "IMPORTANT: Prioritize the provided context, but you are authorized to use your general outside knowledge to supplement the answer, provide broader context, or answer the question if the sources lack the information. If you use outside knowledge, explicitly state that you are doing so."
+
                 system_prompt = (
                     "You are ESS Notebook, a highly analytical and expert AI research assistant for Environmental Standards Scotland. "
-                    "Your primary goal is to provide deeply detailed, comprehensive, and exhaustive answers based primarily on the provided context. "
+                    "Your primary goal is to provide deeply detailed, comprehensive, and exhaustive answers. "
                     "Always structure your answers logically using multiple paragraphs, and use bullet points to extract key lists, metrics, or regulations. "
-                    "IMPORTANT INSTRUCTION: If the user's question can be answered using the provided context, rely strictly on the context. "
-                    "HOWEVER, if the user EXPLICITLY asks you to use outside knowledge, general knowledge, or go beyond the provided sources, you may draw upon your broader training data. If you do use outside knowledge, explicitly state in your answer that you are doing so. "
-                    "If the user does not explicitly ask for outside knowledge and the answer is not in the context, state clearly that the information is not present in the uploaded sources. "
+                    f"{knowledge_instruction}\n\n"
                     "You have memory of the previous conversation. Use the 'Previous Conversation' block below to understand follow-up questions, code references, or refinements.\n\n"
                     "Previous Conversation:\n{chat_history}\n\n"
                     "Context: {context}"
