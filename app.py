@@ -44,6 +44,8 @@ if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 if "raw_text" not in st.session_state:
     st.session_state.raw_text = ""
+if "sources_processed" not in st.session_state:
+    st.session_state.sources_processed = False
 
 # --- SIDEBAR: CONTROLS & UPLOAD ---
 with st.sidebar:
@@ -53,9 +55,15 @@ with st.sidebar:
         ("Gemini 2.5 Flash (Smart & Fast)", "Claude 3.5 Sonnet (Nuanced & Logical)", "Mistral 7B (Free Open Source)")
     )
     
+    # Clear Chat Button
+    if st.button("🗑️ Clear Chat History"):
+        st.session_state.chat_history = []
+        st.rerun()
+
     st.divider()
     
     st.header("📄 Your Sources")
+    st.info("Upload all files and paste all links before clicking Process.")
     
     uploaded_files = st.file_uploader(
         "Upload Documents", 
@@ -65,12 +73,13 @@ with st.sidebar:
     
     web_links = st.text_area("Add Web Links (paste one URL per line)")
     
-    if st.button("Process Sources"):
+    # STEP 1: Process Sources
+    if st.button("1. Process & Index Sources"):
         if uploaded_files or web_links.strip():
             with st.spinner("Reading and indexing your sources..."):
                 raw_text = ""
                 
-                # 1. Process Uploaded Files
+                # Process Uploaded Files
                 if uploaded_files:
                     for file in uploaded_files:
                         filename = file.name.lower()
@@ -93,7 +102,7 @@ with st.sidebar:
                         except Exception as e:
                             st.error(f"Could not read {file.name}: {e}")
                 
-                # 2. Process Web Links
+                # Process Web Links
                 if web_links.strip():
                     urls = [url.strip() for url in web_links.split('\n') if url.strip()]
                     for url in urls:
@@ -110,7 +119,7 @@ with st.sidebar:
                     text_splitter = RecursiveCharacterTextSplitter(chunk_size=2000, chunk_overlap=200)
                     chunks = text_splitter.split_text(raw_text)
 
-                    # --- EMBEDDING STRATEGY ---
+                    # EMBEDDING STRATEGY
                     if hf_api_token:
                         try:
                             embeddings = HuggingFaceEndpointEmbeddings(
@@ -120,44 +129,44 @@ with st.sidebar:
                             )
                             vector_store = FAISS.from_texts(chunks, embedding=embeddings)
                             st.session_state.vector_store = vector_store
-                            st.success("Sources processed successfully! Generating overview...")
-                            
-                            # --- NOTEBOOK OVERVIEW GENERATOR ---
-                            with st.spinner(f"Writing Notebook Overview using {ai_choice}..."):
-                                try:
-                                    # Instantiate the correct model for the summary
-                                    if ai_choice == "Gemini 2.5 Flash (Smart & Fast)":
-                                        llm_summary = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=gemini_api_key)
-                                        prompt_text = f"You are an expert analyst. Read the following source material and provide a detailed, multi-paragraph overview of the key themes, main arguments, and essential data points. \n\n{raw_text[:50000]}"
-                                        response = llm_summary.invoke(prompt_text)
-                                        summary_content = response.content
-                                    elif ai_choice == "Claude 3.5 Sonnet (Nuanced & Logical)":
-                                        llm_summary = ChatAnthropic(model_name="claude-3-5-sonnet-latest", anthropic_api_key=anthropic_api_key)
-                                        prompt_text = f"You are an expert analyst. Read the following source material and provide a detailed, multi-paragraph overview of the key themes, main arguments, and essential data points. \n\n{raw_text[:50000]}"
-                                        response = llm_summary.invoke(prompt_text)
-                                        summary_content = response.content
-                                    else:
-                                        # Mistral requires a much shorter prompt due to free tier context window limits
-                                        llm_summary = HuggingFaceEndpoint(repo_id="mistralai/Mistral-7B-Instruct-v0.2", huggingfacehub_api_token=hf_api_token, temperature=0.3, max_new_tokens=512)
-                                        prompt_text = f"Provide a comprehensive summary of the key themes in this text:\n\n{raw_text[:8000]}"
-                                        summary_content = llm_summary.invoke(prompt_text)
-                                    
-                                    # Inject the summary into the chat history as the first message!
-                                    overview_message = f"**📑 Source Overview:**\n\n{summary_content}"
-                                    st.session_state.chat_history.append({"role": "assistant", "content": overview_message})
-                                    st.rerun() # Refresh the page to show the new summary in the chat window
-                                except Exception as summary_e:
-                                    st.warning(f"Sources loaded, but could not generate automatic summary: {summary_e}")
-                                    
+                            st.session_state.sources_processed = True
+                            st.success("Sources successfully indexed! You can now generate an overview or start asking questions.")
                         except Exception as e:
                             st.error(f"Hugging Face Embedding Error: {e}")
                     else:
                         st.error("Hugging Face API token missing. Cannot process.")
-
                 else:
                     st.error("No readable text was found in the provided sources.")
         else:
             st.warning("Please upload a file or enter a web link.")
+
+    # STEP 2: Explicit Summary Generation
+    if st.session_state.sources_processed:
+        st.divider()
+        if st.button("2. Generate Source Overview"):
+            with st.spinner(f"Writing Notebook Overview using {ai_choice}..."):
+                try:
+                    raw_text = st.session_state.raw_text
+                    if ai_choice == "Gemini 2.5 Flash (Smart & Fast)":
+                        llm_summary = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=gemini_api_key)
+                        prompt_text = f"You are an expert analyst. Read the following source material and provide a detailed, multi-paragraph overview of the key themes, main arguments, and essential data points. \n\n{raw_text[:50000]}"
+                        response = llm_summary.invoke(prompt_text)
+                        summary_content = response.content
+                    elif ai_choice == "Claude 3.5 Sonnet (Nuanced & Logical)":
+                        llm_summary = ChatAnthropic(model_name="claude-3-5-sonnet-latest", anthropic_api_key=anthropic_api_key)
+                        prompt_text = f"You are an expert analyst. Read the following source material and provide a detailed, multi-paragraph overview of the key themes, main arguments, and essential data points. \n\n{raw_text[:50000]}"
+                        response = llm_summary.invoke(prompt_text)
+                        summary_content = response.content
+                    else:
+                        llm_summary = HuggingFaceEndpoint(repo_id="mistralai/Mistral-7B-Instruct-v0.2", huggingfacehub_api_token=hf_api_token, temperature=0.3, max_new_tokens=512)
+                        prompt_text = f"Provide a comprehensive summary of the key themes in this text:\n\n{raw_text[:8000]}"
+                        summary_content = llm_summary.invoke(prompt_text)
+                    
+                    overview_message = f"**📑 Source Overview:**\n\n{summary_content}"
+                    st.session_state.chat_history.append({"role": "assistant", "content": overview_message})
+                    st.rerun()
+                except Exception as summary_e:
+                    st.warning(f"Could not generate automatic summary: {summary_e}")
 
 # --- MAIN CHAT INTERFACE ---
 st.divider()
@@ -166,7 +175,8 @@ for message in st.session_state.chat_history:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-if user_question := st.chat_input("Ask a question about your sources..."):
+# --- UPDATED CHAT INPUT TEXT ---
+if user_question := st.chat_input("Ask about your sources (or explicitly ask to use outside knowledge)..."):
     if st.session_state.vector_store is None:
         st.error("Please process your sources first!")
     elif ai_choice == "Mistral 7B (Free Open Source)" and not hf_api_token:
@@ -174,9 +184,16 @@ if user_question := st.chat_input("Ask a question about your sources..."):
     elif ai_choice == "Claude 3.5 Sonnet (Nuanced & Logical)" and not anthropic_api_key:
          st.error("Cannot use Claude. Please add your Anthropic API key to the environment variables.")
     else:
+        # Display the user's question
         st.session_state.chat_history.append({"role": "user", "content": user_question})
         with st.chat_message("user"):
             st.markdown(user_question)
+
+        # Build the Memory Buffer
+        formatted_chat_history = ""
+        recent_history = [msg for msg in st.session_state.chat_history if not msg["content"].startswith("**📑 Source Overview:**")][-6:]
+        for msg in recent_history:
+            formatted_chat_history += f"{msg['role'].capitalize()}: {msg['content']}\n"
 
         with st.chat_message("assistant"):
             with st.spinner(f"Analyzing deeply using {ai_choice}..."):
@@ -188,13 +205,16 @@ if user_question := st.chat_input("Ask a question about your sources..."):
                 else:
                     llm = HuggingFaceEndpoint(repo_id="mistralai/Mistral-7B-Instruct-v0.2", huggingfacehub_api_token=hf_api_token, temperature=0.3, max_new_tokens=512)
                 
-                # --- UPDATED SYSTEM PROMPT FOR MAXIMUM DETAIL ---
+                # --- UPDATED SYSTEM PROMPT FOR EXTERNAL KNOWLEDGE ---
                 system_prompt = (
                     "You are ESS Notebook, a highly analytical and expert AI research assistant for Environmental Standards Scotland. "
-                    "Your primary goal is to provide deeply detailed, comprehensive, and exhaustive answers based strictly on the provided context. "
+                    "Your primary goal is to provide deeply detailed, comprehensive, and exhaustive answers based primarily on the provided context. "
                     "Always structure your answers logically using multiple paragraphs, and use bullet points to extract key lists, metrics, or regulations. "
-                    "Never provide a short answer if a long, detailed explanation is warranted by the context. "
-                    "If you cannot answer the question based on the context, state clearly that the information is not present in the uploaded sources. "
+                    "IMPORTANT INSTRUCTION: If the user's question can be answered using the provided context, rely strictly on the context. "
+                    "HOWEVER, if the user EXPLICITLY asks you to use outside knowledge, general knowledge, or go beyond the provided sources, you may draw upon your broader training data. If you do use outside knowledge, explicitly state in your answer that you are doing so. "
+                    "If the user does not explicitly ask for outside knowledge and the answer is not in the context, state clearly that the information is not present in the uploaded sources. "
+                    "You have memory of the previous conversation. Use the 'Previous Conversation' block below to understand follow-up questions, code references, or refinements.\n\n"
+                    "Previous Conversation:\n{chat_history}\n\n"
                     "Context: {context}"
                 )
                 
@@ -203,14 +223,15 @@ if user_question := st.chat_input("Ask a question about your sources..."):
                     ("human", "{input}"),
                 ])
                 
-                # --- INCREASED 'K' FOR MORE CONTEXT ---
-                # We changed k=4 to k=10. The AI now reads 2.5x more text before answering!
                 retriever = st.session_state.vector_store.as_retriever(search_kwargs={"k": 10})
                 question_answer_chain = create_stuff_documents_chain(llm, prompt)
                 rag_chain = create_retrieval_chain(retriever, question_answer_chain)
                 
                 try:
-                    response = rag_chain.invoke({"input": user_question})
+                    response = rag_chain.invoke({
+                        "input": user_question,
+                        "chat_history": formatted_chat_history
+                    })
                     answer = response["answer"]
                     st.markdown(answer)
                     st.session_state.chat_history.append({"role": "assistant", "content": answer})
