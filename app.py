@@ -1,5 +1,9 @@
 import streamlit as st
 import PyPDF2
+import docx2txt
+import pandas as pd
+import requests
+from bs4 import BeautifulSoup
 import os
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
@@ -12,7 +16,6 @@ from langchain_core.prompts import ChatPromptTemplate
 # --- PAGE SETUP ---
 st.set_page_config(page_title="ESS Notebook", page_icon="📚", layout="wide")
 
-# Try to load the logo
 try:
     st.image("logo.png", width=400)
 except FileNotFoundError:
@@ -40,8 +43,6 @@ if "raw_text" not in st.session_state:
 # --- SIDEBAR: CONTROLS & UPLOAD ---
 with st.sidebar:
     st.header("⚙️ AI Settings")
-    
-    # The Multi-Model Toggle
     ai_choice = st.radio(
         "Select your AI Brain:",
         ("Gemini 1.5 Flash (Smart & Fast)", "Mistral 7B (Free Open Source)")
@@ -50,69 +51,103 @@ with st.sidebar:
     st.divider()
     
     st.header("📄 Your Sources")
-    uploaded_files = st.file_uploader("Upload PDFs", type="pdf", accept_multiple_files=True)
+    
+    # Expanded File Uploader
+    uploaded_files = st.file_uploader(
+        "Upload Documents", 
+        type=["pdf", "docx", "txt", "csv", "xlsx"], 
+        accept_multiple_files=True
+    )
+    
+    # Web Link Input
+    web_links = st.text_area("Add Web Links (paste one URL per line)")
     
     if st.button("Process Sources"):
-        if uploaded_files:
+        if uploaded_files or web_links.strip():
             if not gemini_api_key:
                 st.error("Gemini API key required to process embeddings.")
             else:
-                with st.spinner("Reading and indexing your documents..."):
-                    # 1. Read PDFs
+                with st.spinner("Reading and indexing your sources..."):
                     raw_text = ""
-                    for file in uploaded_files:
-                        pdf_reader = PyPDF2.PdfReader(file)
-                        for page in pdf_reader.pages:
-                            # Basic error handling for unreadable PDF pages
-                            text = page.extract_text()
-                            if text:
-                                raw_text += text + "\n"
                     
-                    st.session_state.raw_text = raw_text
-
-                    # 2. Split Text
-                    text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
-                    chunks = text_splitter.split_text(raw_text)
-
-                    # 3. Create Vector Store 
-                    # We use Gemini for embeddings because it is fast, highly accurate, and cheap/free for this volume.
-                    embeddings = GoogleGenerativeAIEmbeddings(model="models/embedding-001", google_api_key=gemini_api_key)
-                    vector_store = FAISS.from_texts(chunks, embedding=embeddings)
-                    st.session_state.vector_store = vector_store
+                    # 1. Process Uploaded Files
+                    if uploaded_files:
+                        for file in uploaded_files:
+                            filename = file.name.lower()
+                            try:
+                                if filename.endswith(".pdf"):
+                                    pdf_reader = PyPDF2.PdfReader(file)
+                                    for page in pdf_reader.pages:
+                                        text = page.extract_text()
+                                        if text: raw_text += text + "\n"
+                                elif filename.endswith(".docx"):
+                                    raw_text += docx2txt.process(file) + "\n"
+                                elif filename.endswith(".csv"):
+                                    df = pd.read_csv(file)
+                                    raw_text += df.to_string() + "\n"
+                                elif filename.endswith(".xlsx"):
+                                    df = pd.read_excel(file)
+                                    raw_text += df.to_string() + "\n"
+                                elif filename.endswith(".txt"):
+                                    raw_text += file.getvalue().decode("utf-8") + "\n"
+                            except Exception as e:
+                                st.error(f"Could not read {file.name}: {e}")
                     
-                    st.success("Sources processed successfully!")
+                    # 2. Process Web Links
+                    if web_links.strip():
+                        urls = [url.strip() for url in web_links.split('\n') if url.strip()]
+                        for url in urls:
+                            try:
+                                response = requests.get(url, timeout=10)
+                                soup = BeautifulSoup(response.content, 'html.parser')
+                                raw_text += ' '.join(soup.stripped_strings) + "\n"
+                            except Exception as e:
+                                 st.error(f"Could not read URL {url}: {e}")
+                    
+                    if raw_text.strip():
+                        st.session_state.raw_text = raw_text
+
+                        # Split Text
+                        text_splitter = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=200)
+                        chunks = text_splitter.split_text(raw_text)
+
+                        # Create Vector Store using the NEW Gemini Embedding Model
+                        embeddings = GoogleGenerativeAIEmbeddings(
+                            model="models/gemini-embedding-001", 
+                            google_api_key=gemini_api_key
+                        )
+                        vector_store = FAISS.from_texts(chunks, embedding=embeddings)
+                        st.session_state.vector_store = vector_store
+                        
+                        st.success("Sources processed successfully!")
+                    else:
+                        st.error("No readable text was found in the provided sources.")
         else:
-            st.warning("Please upload at least one PDF.")
+            st.warning("Please upload a file or enter a web link.")
 
 # --- MAIN CHAT INTERFACE ---
 st.divider()
 
-# Display Chat History
 for message in st.session_state.chat_history:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# User Input
 if user_question := st.chat_input("Ask a question about your sources..."):
     if st.session_state.vector_store is None:
-        st.error("Please upload and process sources first!")
+        st.error("Please process your sources first!")
     elif ai_choice == "Mistral 7B (Free Open Source)" and not hf_api_token:
          st.error("Cannot use Mistral. Please add your Hugging Face API token to the environment variables.")
     else:
-        # Show user message
         st.session_state.chat_history.append({"role": "user", "content": user_question})
         with st.chat_message("user"):
             st.markdown(user_question)
 
-        # Generate Response using RAG
         with st.chat_message("assistant"):
             with st.spinner(f"Thinking using {ai_choice}..."):
                 
-                # --- DYNAMIC AI SELECTION ---
                 if ai_choice == "Gemini 1.5 Flash (Smart & Fast)":
                     llm = ChatGoogleGenerativeAI(model="gemini-1.5-flash", google_api_key=gemini_api_key)
                 else:
-                    # Using Mistral 7B Instruct via Hugging Face's free inference API
                     llm = HuggingFaceEndpoint(
                         repo_id="mistralai/Mistral-7B-Instruct-v0.2", 
                         huggingfacehub_api_token=hf_api_token,
@@ -140,8 +175,6 @@ if user_question := st.chat_input("Ask a question about your sources..."):
                     response = rag_chain.invoke({"input": user_question})
                     answer = response["answer"]
                     st.markdown(answer)
-                    
-                    # Save to history
                     st.session_state.chat_history.append({"role": "assistant", "content": answer})
                 except Exception as e:
                     st.error(f"An error occurred while generating the response: {e}")
