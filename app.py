@@ -29,7 +29,7 @@ st.markdown("### Your research and coding assistant for Environmental Standards.
 # --- NEW INTRODUCTION ---
 st.info("""
 **Welcome to ESS Notebook! Here is how to use this tool:**
-1. **Add Your Sources:** Upload your PDFs, Word docs, spreadsheets, or paste web links in the sidebar, then click **Process & Index Sources**.
+1. **Add Your Sources:** You do not have to add sources - if you select "Include General Knowledge" in the Knowledge Base section on the left of the screen, you can use this app just like a normal AI chat. If you want to use it as a Notebook, you can upload sources. If you select "Strictly Uploaded Sources" in the Knowledge Base section on the left, the app will only look at the sources you provided, nothing else from the wider internet, but if you select "Include General Knowledge" the app will combine your sources with others on the web. Upload your PDFs, Word docs, spreadsheets, or paste web links in the sidebar, then click **Process & Index Sources**.
 2. **Generate an Overview:** Once processed, you can click **Generate Source Overview** to get an automatic, detailed summary of all your materials.
 3. **Chat & Analyze:** Ask deep, complex questions about your sources in the chat box below.
 * **Tip:** Use the settings in the sidebar to change the AI's "Brain," or switch the Knowledge Base to **"Include General Knowledge"** to use the AI as a standard chatbot without needing to upload any sources!
