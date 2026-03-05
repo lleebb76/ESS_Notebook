@@ -9,6 +9,7 @@ import time
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_anthropic import ChatAnthropic
+from langchain_openai import ChatOpenAI
 from langchain_huggingface import HuggingFaceEndpoint, HuggingFaceEndpointEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_classic.chains import create_retrieval_chain
@@ -23,12 +24,22 @@ try:
 except FileNotFoundError:
     st.title("📚 ESS Notebook")
 
-st.markdown("### Your research and maybe coding assistant for Environmental Standards.")
+st.markdown("### Your research and coding assistant for Environmental Standards.")
+
+# --- NEW INTRODUCTION ---
+st.info("""
+**Welcome to ESS Notebook! Here is how to use this tool:**
+1. **Add Your Sources:** Upload your PDFs, Word docs, spreadsheets, or paste web links in the sidebar, then click **Process & Index Sources**.
+2. **Generate an Overview:** Once processed, you can click **Generate Source Overview** to get an automatic, detailed summary of all your materials.
+3. **Chat & Analyze:** Ask deep, complex questions about your sources in the chat box below.
+* **Tip:** Use the settings in the sidebar to change the AI's "Brain," or switch the Knowledge Base to **"Include General Knowledge"** to use the AI as a standard chatbot without needing to upload any sources!
+""")
 
 # --- API KEY CHECKS ---
 gemini_api_key = os.environ.get("GEMINI_API_KEY")
 hf_api_token = os.environ.get("HUGGINGFACEHUB_API_TOKEN")
 anthropic_api_key = os.environ.get("ANTHROPIC_API_KEY")
+openai_api_key = os.environ.get("OPENAI_API_KEY")
 
 if not gemini_api_key:
     st.warning("⚠️ Please set your GEMINI_API_KEY in the environment variables.")
@@ -36,6 +47,8 @@ if not hf_api_token:
     st.error("🛑 HUGGINGFACEHUB_API_TOKEN is missing. This is required to process documents for free.")
 if not anthropic_api_key:
     st.info("ℹ️ ANTHROPIC_API_KEY not found. The Claude option will be disabled.")
+if not openai_api_key:
+    st.info("ℹ️ OPENAI_API_KEY not found. The ChatGPT option will be disabled.")
 
 # --- INITIALIZE SESSION STATE ---
 if "vector_store" not in st.session_state:
@@ -50,12 +63,20 @@ if "sources_processed" not in st.session_state:
 # --- SIDEBAR: CONTROLS & UPLOAD ---
 with st.sidebar:
     st.header("⚙️ AI Settings")
+    
+    # Updated AI Choice with Gemini Pro and ChatGPT
     ai_choice = st.radio(
         "Select your AI Brain:",
-        ("Gemini 2.5 Flash (Smart & Fast)", "Claude 3.5 Sonnet (Nuanced & Logical)", "Mistral 7B (Free Open Source)")
+        (
+            "Gemini 2.5 Flash (Smart & Fast)", 
+            "Gemini 2.5 Pro (Advanced Reasoning)", 
+            "ChatGPT (OpenAI)", 
+            "Claude 3.5 Sonnet (Nuanced & Logical)", 
+            "Mistral 7B (Free Open Source)"
+        )
     )
     
-    # --- NEW KNOWLEDGE BASE TOGGLE ---
+    # Knowledge Base Toggle
     knowledge_source = st.radio(
         "Knowledge Base:",
         ("Strictly Uploaded Sources", "Include General Knowledge")
@@ -153,20 +174,27 @@ with st.sidebar:
             with st.spinner(f"Writing Notebook Overview using {ai_choice}..."):
                 try:
                     raw_text = st.session_state.raw_text
+                    
+                    # Logic updated to include new models
                     if ai_choice == "Gemini 2.5 Flash (Smart & Fast)":
                         llm_summary = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=gemini_api_key)
-                        prompt_text = f"You are an expert analyst. Read the following source material and provide a detailed, multi-paragraph overview of the key themes, main arguments, and essential data points. \n\n{raw_text[:50000]}"
-                        response = llm_summary.invoke(prompt_text)
-                        summary_content = response.content
+                    elif ai_choice == "Gemini 2.5 Pro (Advanced Reasoning)":
+                        llm_summary = ChatGoogleGenerativeAI(model="gemini-2.5-pro", google_api_key=gemini_api_key)
+                    elif ai_choice == "ChatGPT (OpenAI)":
+                        llm_summary = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key)
                     elif ai_choice == "Claude 3.5 Sonnet (Nuanced & Logical)":
                         llm_summary = ChatAnthropic(model_name="claude-3-5-sonnet-latest", anthropic_api_key=anthropic_api_key)
-                        prompt_text = f"You are an expert analyst. Read the following source material and provide a detailed, multi-paragraph overview of the key themes, main arguments, and essential data points. \n\n{raw_text[:50000]}"
-                        response = llm_summary.invoke(prompt_text)
-                        summary_content = response.content
                     else:
                         llm_summary = HuggingFaceEndpoint(repo_id="mistralai/Mistral-7B-Instruct-v0.2", huggingfacehub_api_token=hf_api_token, temperature=0.3, max_new_tokens=512)
+                    
+                    # Process the prompt
+                    if "Mistral" in ai_choice:
                         prompt_text = f"Provide a comprehensive summary of the key themes in this text:\n\n{raw_text[:8000]}"
-                        summary_content = llm_summary.invoke(prompt_text)
+                    else:
+                        prompt_text = f"You are an expert analyst. Read the following source material and provide a detailed, multi-paragraph overview of the key themes, main arguments, and essential data points. \n\n{raw_text[:50000]}"
+                    
+                    response = llm_summary.invoke(prompt_text)
+                    summary_content = response.content if hasattr(response, 'content') else response
                     
                     overview_message = f"**📑 Source Overview:**\n\n{summary_content}"
                     st.session_state.chat_history.append({"role": "assistant", "content": overview_message})
@@ -181,14 +209,17 @@ for message in st.session_state.chat_history:
     with st.chat_message(message["role"]):
         st.markdown(message["content"])
 
-# Reverted chat input text to be cleaner
-if user_question := st.chat_input("Ask a question about your sources..."):
-    if st.session_state.vector_store is None:
-        st.error("Please process your sources first!")
+if user_question := st.chat_input("Ask a question about your sources (or use general knowledge)..."):
+    
+    # --- NO-SOURCE BYPASS LOGIC ---
+    if st.session_state.vector_store is None and knowledge_source == "Strictly Uploaded Sources":
+        st.error("Please process your sources first, or switch the Knowledge Base to 'Include General Knowledge' to chat freely!")
     elif ai_choice == "Mistral 7B (Free Open Source)" and not hf_api_token:
          st.error("Cannot use Mistral. Please add your Hugging Face API token to the environment variables.")
     elif ai_choice == "Claude 3.5 Sonnet (Nuanced & Logical)" and not anthropic_api_key:
          st.error("Cannot use Claude. Please add your Anthropic API key to the environment variables.")
+    elif ai_choice == "ChatGPT (OpenAI)" and not openai_api_key:
+         st.error("Cannot use ChatGPT. Please add your OpenAI API key to the environment variables.")
     else:
         # Display the user's question
         st.session_state.chat_history.append({"role": "user", "content": user_question})
@@ -204,8 +235,13 @@ if user_question := st.chat_input("Ask a question about your sources..."):
         with st.chat_message("assistant"):
             with st.spinner(f"Analyzing deeply using {ai_choice}..."):
                 
+                # Model Initialization
                 if ai_choice == "Gemini 2.5 Flash (Smart & Fast)":
                     llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=gemini_api_key)
+                elif ai_choice == "Gemini 2.5 Pro (Advanced Reasoning)":
+                    llm = ChatGoogleGenerativeAI(model="gemini-2.5-pro", google_api_key=gemini_api_key)
+                elif ai_choice == "ChatGPT (OpenAI)":
+                    llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key)
                 elif ai_choice == "Claude 3.5 Sonnet (Nuanced & Logical)":
                     llm = ChatAnthropic(model_name="claude-3-5-sonnet-latest", anthropic_api_key=anthropic_api_key)
                 else:
@@ -215,7 +251,7 @@ if user_question := st.chat_input("Ask a question about your sources..."):
                 if knowledge_source == "Strictly Uploaded Sources":
                     knowledge_instruction = "IMPORTANT: Answer STRICTLY using the provided context. If the answer is not in the context, clearly state that the information is not present in the uploaded sources. Do not hallucinate or use outside knowledge."
                 else:
-                    knowledge_instruction = "IMPORTANT: Prioritize the provided context, but you are authorized to use your general outside knowledge to supplement the answer, provide broader context, or answer the question if the sources lack the information. If you use outside knowledge, explicitly state that you are doing so."
+                    knowledge_instruction = "IMPORTANT: Prioritize the provided context if it exists, but you are completely authorized to use your general outside knowledge to answer the question or provide broader context."
 
                 system_prompt = (
                     "You are ESS Notebook, a highly analytical and expert AI research assistant for Environmental Standards Scotland. "
@@ -227,21 +263,37 @@ if user_question := st.chat_input("Ask a question about your sources..."):
                     "Context: {context}"
                 )
                 
-                prompt = ChatPromptTemplate.from_messages([
-                    ("system", system_prompt),
-                    ("human", "{input}"),
-                ])
-                
-                retriever = st.session_state.vector_store.as_retriever(search_kwargs={"k": 10})
-                question_answer_chain = create_stuff_documents_chain(llm, prompt)
-                rag_chain = create_retrieval_chain(retriever, question_answer_chain)
-                
                 try:
-                    response = rag_chain.invoke({
-                        "input": user_question,
-                        "chat_history": formatted_chat_history
-                    })
-                    answer = response["answer"]
+                    # RAG vs Non-RAG Logic
+                    if st.session_state.vector_store is not None:
+                        # RAG Route (Sources uploaded)
+                        prompt = ChatPromptTemplate.from_messages([
+                            ("system", system_prompt),
+                            ("human", "{input}"),
+                        ])
+                        retriever = st.session_state.vector_store.as_retriever(search_kwargs={"k": 10})
+                        question_answer_chain = create_stuff_documents_chain(llm, prompt)
+                        rag_chain = create_retrieval_chain(retriever, question_answer_chain)
+                        
+                        response = rag_chain.invoke({
+                            "input": user_question,
+                            "chat_history": formatted_chat_history
+                        })
+                        answer = response["answer"]
+                    else:
+                        # General Knowledge Route (No sources uploaded)
+                        system_prompt_no_context = system_prompt.replace("Context: {context}", "Context: No documents uploaded.")
+                        prompt = ChatPromptTemplate.from_messages([
+                            ("system", system_prompt_no_context),
+                            ("human", "{input}"),
+                        ])
+                        chain = prompt | llm
+                        response = chain.invoke({
+                            "input": user_question,
+                            "chat_history": formatted_chat_history
+                        })
+                        answer = response.content if hasattr(response, 'content') else response
+
                     st.markdown(answer)
                     st.session_state.chat_history.append({"role": "assistant", "content": answer})
                 except Exception as e:
