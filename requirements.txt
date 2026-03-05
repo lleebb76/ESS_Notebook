@@ -14,3 +14,4 @@ faiss-cpu
 python-dotenv
 langchain-classic
 langchain-anthropic
+langchain-openai
