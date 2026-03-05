@@ -29,7 +29,7 @@ st.markdown("### Your research and coding assistant for Environmental Standards.
 # --- NEW INTRODUCTION ---
 st.info("""
 **Welcome to ESS Notebook! Here is how to use this tool:**
-1. **Add Your Sources:** Upload your PDFs, Word docs, spreadsheets, or paste web links in the sidebar, then click **Process & Index Sources**.
+1. **Add Your Sources:** You do not have to add sources - you can simply use this tool as a normal AI chat by clicking "Include General Knowledge" on the left of the screen. But, if you want to use this tool as a notebook, or add specific sources, you can do so. You can combine your sources with general knowledge, or, if you click "Strictly Uploaded Sources" the app will not look online for any other sources, only what you provide. Upload your PDFs, Word docs, spreadsheets, or paste web links in the sidebar, then click **Process & Index Sources**.
 2. **Generate an Overview:** Once processed, you can click **Generate Source Overview** to get an automatic, detailed summary of all your materials.
 3. **Chat & Analyze:** Ask deep, complex questions about your sources in the chat box below.
 * **Tip:** Use the settings in the sidebar to change the AI's "Brain," or switch the Knowledge Base to **"Include General Knowledge"** to use the AI as a standard chatbot without needing to upload any sources!
@@ -200,7 +200,13 @@ with st.sidebar:
                     st.session_state.chat_history.append({"role": "assistant", "content": overview_message})
                     st.rerun()
                 except Exception as summary_e:
-                    st.warning(f"Could not generate automatic summary: {summary_e}")
+                    error_msg = str(summary_e)
+                    if "limit: 0" in error_msg and "gemini-2.5-pro" in error_msg:
+                        st.error("🛑 Billing Error: Your Google API key is on the Free Tier, which does not grant access to Gemini 2.5 Pro. Please update your billing in Google AI Studio or use Gemini Flash.")
+                    elif "credit balance is too low" in error_msg:
+                        st.error("🛑 Billing Error: Your Anthropic API account has run out of credits. Please add prepaid funds in the Anthropic Console to use Claude.")
+                    else:
+                        st.warning(f"Could not generate automatic summary: {summary_e}")
 
 # --- MAIN CHAT INTERFACE ---
 st.divider()
@@ -297,4 +303,10 @@ if user_question := st.chat_input("Ask a question about your sources (or use gen
                     st.markdown(answer)
                     st.session_state.chat_history.append({"role": "assistant", "content": answer})
                 except Exception as e:
-                    st.error(f"An error occurred while generating the response: {e}")
+                    error_msg = str(e)
+                    if "limit: 0" in error_msg and "gemini-2.5-pro" in error_msg:
+                        st.error("🛑 Billing Error: Your Google API key is on the Free Tier, which does not grant access to Gemini 2.5 Pro. Please update your billing in Google AI Studio or use Gemini Flash.")
+                    elif "credit balance is too low" in error_msg:
+                        st.error("🛑 Billing Error: Your Anthropic API account has run out of credits. Please add prepaid funds in the Anthropic Console to use Claude.")
+                    else:
+                        st.error(f"An error occurred while generating the response: {e}")
