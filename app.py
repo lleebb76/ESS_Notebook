@@ -10,7 +10,7 @@ from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
 from langchain_anthropic import ChatAnthropic
 from langchain_openai import AzureChatOpenAI
-from langchain_huggingface import HuggingFaceEndpoint, HuggingFaceEndpointEmbeddings
+from langchain_huggingface import HuggingFaceEndpoint, HuggingFaceEndpointEmbeddings, ChatHuggingFace
 from langchain_community.vectorstores import FAISS
 from langchain_classic.chains import create_retrieval_chain
 from langchain_classic.chains.combine_documents import create_stuff_documents_chain
@@ -29,7 +29,7 @@ st.markdown("### Your research and coding assistant for Environmental Standards.
 # --- NEW INTRODUCTION ---
 st.info("""
 **Welcome to ESS Notebook! Here is how to use this tool:**
-1. **Add Your Sources:** You do not have to add sources - if you select "Include General Knowledge" in the Knowledge Base section on the left of the screen, you can use this app just like a normal AI chat. If you want to use it as a Notebook, you can upload sources. If you select "Strictly Uploaded Sources" in the Knowledge Base section on the left, the app will only look at the sources you provided, nothing else from the wider internet, but if you select "Include General Knowledge" the app will combine your sources with others on the web. Upload your PDFs, Word docs, spreadsheets, or paste web links in the sidebar, then click **Process & Index Sources**.
+1. **Add Your Sources:** Upload your PDFs, Word docs, spreadsheets, or paste web links in the sidebar, then click **Process & Index Sources**.
 2. **Generate an Overview:** Once processed, you can click **Generate Source Overview** to get an automatic, detailed summary of all your materials.
 3. **Chat & Analyze:** Ask deep, complex questions about your sources in the chat box below.
 * **Tip:** Use the settings in the sidebar to change the AI's "Brain," or switch the Knowledge Base to **"Include General Knowledge"** to use the AI as a standard chatbot without needing to upload any sources!
@@ -109,7 +109,6 @@ with st.sidebar:
             with st.spinner("Reading and indexing your sources..."):
                 raw_text = ""
                 
-                # Process Uploaded Files
                 if uploaded_files:
                     for file in uploaded_files:
                         filename = file.name.lower()
@@ -132,7 +131,6 @@ with st.sidebar:
                         except Exception as e:
                             st.error(f"Could not read {file.name}: {e}")
                 
-                # Process Web Links
                 if web_links.strip():
                     urls = [url.strip() for url in web_links.split('\n') if url.strip()]
                     for url in urls:
@@ -178,7 +176,6 @@ with st.sidebar:
                 try:
                     raw_text = st.session_state.raw_text
                     
-                    # Logic updated to include Azure
                     if ai_choice == "Gemini 2.5 Flash (Smart & Fast)":
                         llm_summary = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=gemini_api_key)
                     elif ai_choice == "Gemini 2.5 Pro (Advanced Reasoning)":
@@ -193,9 +190,11 @@ with st.sidebar:
                     elif ai_choice == "Claude 3.5 Sonnet (Nuanced & Logical)":
                         llm_summary = ChatAnthropic(model_name="claude-3-5-sonnet-latest", anthropic_api_key=anthropic_api_key)
                     elif ai_choice == "Llama 3 8B (Free Open Source)":
-                        llm_summary = HuggingFaceEndpoint(repo_id="meta-llama/Meta-Llama-3-8B-Instruct", huggingfacehub_api_token=hf_api_token, temperature=0.3, max_new_tokens=512)
+                        hf_llm = HuggingFaceEndpoint(repo_id="meta-llama/Meta-Llama-3-8B-Instruct", huggingfacehub_api_token=hf_api_token, temperature=0.3, max_new_tokens=512)
+                        llm_summary = ChatHuggingFace(llm=hf_llm) # Wraps the raw endpoint in the required Chat format
                     else:
-                        llm_summary = HuggingFaceEndpoint(repo_id="mistralai/Mistral-7B-Instruct-v0.2", huggingfacehub_api_token=hf_api_token, temperature=0.3, max_new_tokens=512)
+                        hf_llm = HuggingFaceEndpoint(repo_id="mistralai/Mistral-7B-Instruct-v0.2", huggingfacehub_api_token=hf_api_token, temperature=0.3, max_new_tokens=512)
+                        llm_summary = ChatHuggingFace(llm=hf_llm)
                     
                     if "Mistral" in ai_choice or "Llama" in ai_choice:
                         prompt_text = f"Provide a comprehensive summary of the key themes in this text:\n\n{raw_text[:8000]}"
@@ -249,7 +248,6 @@ if user_question := st.chat_input("Ask a question about your sources (or use gen
         with st.chat_message("assistant"):
             with st.spinner(f"Analyzing deeply using {ai_choice}..."):
                 
-                # Model Initialization updated for Azure
                 if ai_choice == "Gemini 2.5 Flash (Smart & Fast)":
                     llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash", google_api_key=gemini_api_key)
                 elif ai_choice == "Gemini 2.5 Pro (Advanced Reasoning)":
@@ -264,9 +262,11 @@ if user_question := st.chat_input("Ask a question about your sources (or use gen
                 elif ai_choice == "Claude 3.5 Sonnet (Nuanced & Logical)":
                     llm = ChatAnthropic(model_name="claude-3-5-sonnet-latest", anthropic_api_key=anthropic_api_key)
                 elif ai_choice == "Llama 3 8B (Free Open Source)":
-                    llm = HuggingFaceEndpoint(repo_id="meta-llama/Meta-Llama-3-8B-Instruct", huggingfacehub_api_token=hf_api_token, temperature=0.3, max_new_tokens=512)
+                    hf_llm = HuggingFaceEndpoint(repo_id="meta-llama/Meta-Llama-3-8B-Instruct", huggingfacehub_api_token=hf_api_token, temperature=0.3, max_new_tokens=512)
+                    llm = ChatHuggingFace(llm=hf_llm) # Fix applied here too
                 else:
-                    llm = HuggingFaceEndpoint(repo_id="mistralai/Mistral-7B-Instruct-v0.2", huggingfacehub_api_token=hf_api_token, temperature=0.3, max_new_tokens=512)
+                    hf_llm = HuggingFaceEndpoint(repo_id="mistralai/Mistral-7B-Instruct-v0.2", huggingfacehub_api_token=hf_api_token, temperature=0.3, max_new_tokens=512)
+                    llm = ChatHuggingFace(llm=hf_llm)
                 
                 if knowledge_source == "Strictly Uploaded Sources":
                     knowledge_instruction = "IMPORTANT: Answer STRICTLY using the provided context. If the answer is not in the context, clearly state that the information is not present in the uploaded sources. Do not hallucinate or use outside knowledge."
