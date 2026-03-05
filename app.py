@@ -29,7 +29,7 @@ st.markdown("### Your research and coding assistant for Environmental Standards.
 # --- NEW INTRODUCTION ---
 st.info("""
 **Welcome to ESS Notebook! Here is how to use this tool:**
-1. **Add Your Sources:** You do not have to add sources - you can simply use this tool as a normal AI chat by clicking "Include General Knowledge" on the left of the screen. But, if you want to use this tool as a notebook, or add specific sources, you can do so. You can combine your sources with general knowledge, or, if you click "Strictly Uploaded Sources" the app will not look online for any other sources, only what you provide. Upload your PDFs, Word docs, spreadsheets, or paste web links in the sidebar, then click **Process & Index Sources**.
+1. **Add Your Sources:** Upload your PDFs, Word docs, spreadsheets, or paste web links in the sidebar, then click **Process & Index Sources**.
 2. **Generate an Overview:** Once processed, you can click **Generate Source Overview** to get an automatic, detailed summary of all your materials.
 3. **Chat & Analyze:** Ask deep, complex questions about your sources in the chat box below.
 * **Tip:** Use the settings in the sidebar to change the AI's "Brain," or switch the Knowledge Base to **"Include General Knowledge"** to use the AI as a standard chatbot without needing to upload any sources!
@@ -64,7 +64,7 @@ if "sources_processed" not in st.session_state:
 with st.sidebar:
     st.header("⚙️ AI Settings")
     
-    # Updated AI Choice with Gemini Pro and ChatGPT
+    # Updated AI Choice with Llama 3
     ai_choice = st.radio(
         "Select your AI Brain:",
         (
@@ -72,6 +72,7 @@ with st.sidebar:
             "Gemini 2.5 Pro (Advanced Reasoning)", 
             "ChatGPT (OpenAI)", 
             "Claude 3.5 Sonnet (Nuanced & Logical)", 
+            "Llama 3 8B (Free Open Source)",
             "Mistral 7B (Free Open Source)"
         )
     )
@@ -184,11 +185,13 @@ with st.sidebar:
                         llm_summary = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key)
                     elif ai_choice == "Claude 3.5 Sonnet (Nuanced & Logical)":
                         llm_summary = ChatAnthropic(model_name="claude-3-5-sonnet-latest", anthropic_api_key=anthropic_api_key)
+                    elif ai_choice == "Llama 3 8B (Free Open Source)":
+                        llm_summary = HuggingFaceEndpoint(repo_id="meta-llama/Meta-Llama-3-8B-Instruct", huggingfacehub_api_token=hf_api_token, temperature=0.3, max_new_tokens=512)
                     else:
                         llm_summary = HuggingFaceEndpoint(repo_id="mistralai/Mistral-7B-Instruct-v0.2", huggingfacehub_api_token=hf_api_token, temperature=0.3, max_new_tokens=512)
                     
                     # Process the prompt
-                    if "Mistral" in ai_choice:
+                    if "Mistral" in ai_choice or "Llama" in ai_choice:
                         prompt_text = f"Provide a comprehensive summary of the key themes in this text:\n\n{raw_text[:8000]}"
                     else:
                         prompt_text = f"You are an expert analyst. Read the following source material and provide a detailed, multi-paragraph overview of the key themes, main arguments, and essential data points. \n\n{raw_text[:50000]}"
@@ -206,7 +209,7 @@ with st.sidebar:
                     elif "credit balance is too low" in error_msg:
                         st.error("🛑 Billing Error: Your Anthropic API account has run out of credits. Please add prepaid funds in the Anthropic Console to use Claude.")
                     else:
-                        st.warning(f"Could not generate automatic summary: {summary_e}")
+                        st.warning(f"Could not generate automatic summary: {summary_e}. If using Llama 3, ensure you have accepted the license on Hugging Face.")
 
 # --- MAIN CHAT INTERFACE ---
 st.divider()
@@ -222,6 +225,8 @@ if user_question := st.chat_input("Ask a question about your sources (or use gen
         st.error("Please process your sources first, or switch the Knowledge Base to 'Include General Knowledge' to chat freely!")
     elif ai_choice == "Mistral 7B (Free Open Source)" and not hf_api_token:
          st.error("Cannot use Mistral. Please add your Hugging Face API token to the environment variables.")
+    elif ai_choice == "Llama 3 8B (Free Open Source)" and not hf_api_token:
+         st.error("Cannot use Llama 3. Please add your Hugging Face API token to the environment variables.")
     elif ai_choice == "Claude 3.5 Sonnet (Nuanced & Logical)" and not anthropic_api_key:
          st.error("Cannot use Claude. Please add your Anthropic API key to the environment variables.")
     elif ai_choice == "ChatGPT (OpenAI)" and not openai_api_key:
@@ -250,6 +255,8 @@ if user_question := st.chat_input("Ask a question about your sources (or use gen
                     llm = ChatOpenAI(model="gpt-4o", openai_api_key=openai_api_key)
                 elif ai_choice == "Claude 3.5 Sonnet (Nuanced & Logical)":
                     llm = ChatAnthropic(model_name="claude-3-5-sonnet-latest", anthropic_api_key=anthropic_api_key)
+                elif ai_choice == "Llama 3 8B (Free Open Source)":
+                    llm = HuggingFaceEndpoint(repo_id="meta-llama/Meta-Llama-3-8B-Instruct", huggingfacehub_api_token=hf_api_token, temperature=0.3, max_new_tokens=512)
                 else:
                     llm = HuggingFaceEndpoint(repo_id="mistralai/Mistral-7B-Instruct-v0.2", huggingfacehub_api_token=hf_api_token, temperature=0.3, max_new_tokens=512)
                 
@@ -308,5 +315,7 @@ if user_question := st.chat_input("Ask a question about your sources (or use gen
                         st.error("🛑 Billing Error: Your Google API key is on the Free Tier, which does not grant access to Gemini 2.5 Pro. Please update your billing in Google AI Studio or use Gemini Flash.")
                     elif "credit balance is too low" in error_msg:
                         st.error("🛑 Billing Error: Your Anthropic API account has run out of credits. Please add prepaid funds in the Anthropic Console to use Claude.")
+                    elif "403 Client Error" in error_msg and "Llama" in ai_choice:
+                        st.error("🛑 Access Error: You must accept Meta's license agreement on Hugging Face before using Llama 3. See instructions below.")
                     else:
                         st.error(f"An error occurred while generating the response: {e}")
